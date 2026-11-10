@@ -1,0 +1,12 @@
+# ESP-IDF build outputs / generated files
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+# local secrets (Wi-Fi credentials etc.)
+sdkconfig.secrets
+# misc
+.DS_Store
+__pycache__/
+.venv/
+firmware/wifi/main/wifi_secrets.h

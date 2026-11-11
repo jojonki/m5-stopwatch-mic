@@ -6,3 +6,7 @@ CONFIG_FREERTOS_HZ=1000
 # Logs on the USB-C port (USB-Serial/JTAG), handy since USB is free here
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# Power management: DFS + automatic light sleep (see swmic::power_save_init)
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y

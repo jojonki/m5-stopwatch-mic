@@ -16,6 +16,7 @@
 #include "adpcm.h"
 #include "ble_audio.h"
 #include "mic.h"
+#include "power.h"
 #include "trigger_gate.h"
 #include "ui.h"
 
@@ -71,6 +72,7 @@ extern "C" void app_main(void) {
   cfg.internal_spk = false;
   M5.begin(cfg);
   M5.Speaker.end();
+  swmic::power_save_init();
 
   ui_start();
 

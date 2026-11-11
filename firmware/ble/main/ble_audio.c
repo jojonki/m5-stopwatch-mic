@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -56,6 +57,26 @@ static const struct ble_gatt_svc_def s_svcs[] = {
 
 static int gap_event(struct ble_gap_event *event, void *arg);
 
+// Ask for a short interval so a press goes out within 15-30 ms, plus
+// peripheral latency: with nothing to send we may skip up to 20 connection
+// events (~0.3-0.6 s), so the radio idles while waiting for a press. When we
+// do have data it goes out at the very next event, so latency is unaffected.
+// (Apple limits: latency <= 30, interval * (latency + 1) <= 2 s.)
+static esp_timer_handle_t s_param_timer;
+
+static void request_low_power_params(void *arg) {
+  uint16_t h = s_conn;
+  if (h == BLE_HS_CONN_HANDLE_NONE) return;
+  struct ble_gap_upd_params upd = {
+      .itvl_min = 12,             // 15 ms
+      .itvl_max = 24,             // 30 ms
+      .latency = 20,
+      .supervision_timeout = 400, // 4 s
+  };
+  int rc = ble_gap_update_params(h, &upd);
+  if (rc) ESP_LOGW(TAG, "conn param request rc=%d", rc);
+}
+
 static void advertise(void) {
   struct ble_hs_adv_fields fields = {0};
   fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
@@ -88,16 +109,12 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
         uint16_t h = event->connect.conn_handle;
         s_conn = h;
         ESP_LOGI(TAG, "connected");
-        // Short interval for low latency, 2M PHY and long PDUs for throughput.
-        struct ble_gap_upd_params upd = {
-            .itvl_min = 12,             // 15 ms
-            .itvl_max = 24,             // 30 ms
-            .latency = 0,
-            .supervision_timeout = 400, // 4 s
-        };
-        ble_gap_update_params(h, &upd);
-        ble_gap_set_prefered_le_phy(h, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_CODED_ANY);
+        // Long PDUs so a 165 B packet fits in one air packet. (No 2M PHY
+        // request: it raced macOS's own PHY update and tripped a controller
+        // assert; 1M PHY has plenty of room for 64 kbps.)
         ble_hs_hci_util_set_data_len(h, 251, 2120);
+        // macOS tends to refuse parameter requests made during discovery.
+        esp_timer_start_once(s_param_timer, 5 * 1000 * 1000);
       } else {
         advertise();
       }
@@ -105,6 +122,7 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
 
     case BLE_GAP_EVENT_DISCONNECT:
       ESP_LOGI(TAG, "disconnected (reason %d)", event->disconnect.reason);
+      esp_timer_stop(s_param_timer);
       s_conn = BLE_HS_CONN_HANDLE_NONE;
       s_subscribed = false;
       s_mtu = 23;
@@ -124,9 +142,13 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       break;
 
     case BLE_GAP_EVENT_CONN_UPDATE: {
+      if (event->conn_update.status) {
+        ESP_LOGW(TAG, "conn param update rejected (status %d)", event->conn_update.status);
+        break;
+      }
       struct ble_gap_conn_desc desc;
       if (ble_gap_conn_find(event->conn_update.conn_handle, &desc) == 0) {
-        ESP_LOGI(TAG, "conn interval %.2f ms", desc.conn_itvl * 1.25f);
+        ESP_LOGI(TAG, "conn interval %.2f ms, latency %u", desc.conn_itvl * 1.25f, desc.conn_latency);
       }
       break;
     }
@@ -174,6 +196,9 @@ void ble_audio_init(const char *device_name) {
   ESP_ERROR_CHECK(ble_gatts_count_cfg(s_svcs));
   ESP_ERROR_CHECK(ble_gatts_add_svcs(s_svcs));
   ble_svc_gap_device_name_set(s_name);
+
+  const esp_timer_create_args_t targs = {.callback = request_low_power_params, .name = "ble_params"};
+  ESP_ERROR_CHECK(esp_timer_create(&targs, &s_param_timer));
 
   nimble_port_freertos_init(host_task);
 }

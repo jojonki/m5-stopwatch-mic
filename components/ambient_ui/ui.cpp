@@ -2,6 +2,7 @@
 //
 //  idle    : true black, one faint thin ring in the middle
 //  trigger : the ring softly fades into a glowing orb that breathes with the voice
+//  untouched for 5 s : the panel goes to sleep until the next press
 //
 // Only a 240x240 region around the centre is redrawn, motion is slow
 // (fades and low-passed size changes), and unchanged frames are skipped,
@@ -24,6 +25,7 @@ constexpr int RING_R = 64;              // idle ring radius
 constexpr uint32_t RING_COLOR = 0x3A3A44;
 constexpr uint32_t GLOW_COLOR = 0x9FE8FF;  // pale ice blue
 constexpr uint32_t CORE_COLOR = 0xF2FCFF;
+constexpr TickType_t SLEEP_AFTER = pdMS_TO_TICKS(5 * 1000);  // screen off when untouched
 
 M5Canvas s_orb(&M5.Display);
 int s_cx, s_cy;
@@ -99,11 +101,33 @@ void ui_task(void *) {
   int last_q_on = -1, last_q_lv = -1;
   int last_status = -1;
   TickType_t last = xTaskGetTickCount();
+  TickType_t last_touch = last;
+  bool asleep = false;
 
   for (;;) {
     bool key = g_ui.key_down.load();
     bool mounted = g_ui.mounted.load();
     bool streaming = g_ui.streaming.load();
+
+    // Screen sleep: off after SLEEP_AFTER without a press, back on at the next press.
+    TickType_t now = xTaskGetTickCount();
+    if (key) last_touch = now;
+    if (asleep) {
+      if (!key) {
+        vTaskDelayUntil(&last, pdMS_TO_TICKS(50));
+        continue;
+      }
+      asleep = false;
+      M5.Display.wakeup();
+      M5.Display.fillScreen(TFT_BLACK);
+      on = 0;
+      last_q_on = last_q_lv = last_status = -1;  // force a full redraw
+    } else if (now - last_touch > SLEEP_AFTER && on < 0.01f) {
+      asleep = true;
+      M5.Display.fillScreen(TFT_BLACK);
+      M5.Display.sleep();
+      continue;
+    }
 
     // slow, frame-rate-forgiving easing
     on += ((key ? 1.0f : 0.0f) - on) * (key ? 0.22f : 0.12f);

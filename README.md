@@ -100,9 +100,8 @@ is held:
 
 Download from [Releases](https://github.com/jojonki/m5-stopwatch-mic/releases):
 
-- **macOS** (Apple silicon + Intel): `StopWatch-Mic-macOS.zip`. The app is
-  not notarized; on first launch right-click it and choose **Open**, or run
-  `xattr -dr com.apple.quarantine "StopWatch Mic.app"`.
+- **macOS** (Apple silicon + Intel): `StopWatch-Mic-macOS.zip`
+  (Developer ID signed and notarized).
 - **Windows** (x64): `swmic-bridge-windows-x64.zip`. SmartScreen may warn on
   first run (unsigned): **More info → Run anyway**.
 
@@ -113,8 +112,11 @@ switch. The StopWatch shows the connected computer's name under the dot.
 Build (needs [Rust](https://rustup.rs/)):
 
 ```sh
-# macOS: builds "StopWatch Mic.app" into apps/swmic-bridge/target/
+# macOS: builds "StopWatch Mic.app" + StopWatch-Mic-macOS.zip into apps/swmic-bridge/target/
 apps/swmic-bridge/macos/bundle.sh
+# signed + notarized release build
+SIGN_IDENTITY="Developer ID Application: …" NOTARY_PROFILE=<notarytool profile> \
+  apps/swmic-bridge/macos/bundle.sh
 
 # Windows (on Windows, or cross-compiled from macOS with mingw-w64)
 cd apps/swmic-bridge
@@ -128,9 +130,7 @@ Tray menu:
 - **Disconnect / Connect**: hand the StopWatch over to another computer.
 - **Check for updates**: also checked at startup and daily; when a newer
   release exists the item becomes **Update to vX.Y.Z and restart**, which
-  downloads it from GitHub Releases, replaces the app and restarts it. On
-  macOS, re-enable the app under Accessibility after an update (the app is
-  ad-hoc signed, so macOS sees each build as a new app).
+  downloads it from GitHub Releases, replaces the app and restarts it.
 
 Options: `--key f3` (overrides the menu choice), `--device "<output device name>"`.
 On macOS, allow Bluetooth on first launch and give the app Accessibility

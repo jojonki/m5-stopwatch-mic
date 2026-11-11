@@ -1,6 +1,6 @@
 [package]
 name = "swmic-bridge"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Tray app bridging the BLE StopWatch mic to a virtual audio device and a trigger key"
 
@@ -9,6 +9,7 @@ btleplug = "0.11"
 tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
 futures = "0.3"
 uuid = "1"
+serde_json = "1"
 cpal = "0.15"
 tray-icon = "0.19"
 tao = "0.30"

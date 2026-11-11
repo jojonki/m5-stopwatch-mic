@@ -144,7 +144,7 @@ async fn session(adapter: &Adapter, shared: &Shared) -> Res<()> {
 
 fn set_key(shared: &Shared, down: bool) {
     if shared.key_down.swap(down, Ordering::Relaxed) != down {
-        key::send(shared.key, down);
+        key::send(shared.key(), down);
         if matches!(shared.state(), State::Connected | State::OnAir) {
             shared.set_state(if down { State::OnAir } else { State::Connected });
         }

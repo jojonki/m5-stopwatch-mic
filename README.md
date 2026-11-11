@@ -122,7 +122,17 @@ cargo build --release                                   # on Windows
 cargo build --release --target x86_64-pc-windows-gnu    # from macOS
 ```
 
-Options: `--key f3` (F1-F20), `--device "<output device name>"`.
+Tray menu:
+
+- **Trigger key**: F1-F20 (remembered across restarts).
+- **Disconnect / Connect**: hand the StopWatch over to another computer.
+- **Check for updates**: also checked at startup and daily; when a newer
+  release exists the item becomes **Update to vX.Y.Z and restart**, which
+  downloads it from GitHub Releases, replaces the app and restarts it. On
+  macOS, re-enable the app under Accessibility after an update (the app is
+  ad-hoc signed, so macOS sees each build as a new app).
+
+Options: `--key f3` (overrides the menu choice), `--device "<output device name>"`.
 On macOS, allow Bluetooth on first launch and give the app Accessibility
 permission so the key reaches other apps.
 

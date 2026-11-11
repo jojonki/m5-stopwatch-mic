@@ -9,6 +9,8 @@ APP="target/StopWatch Mic.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp macos/Info.plist "$APP/Contents/Info.plist"
+VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
 lipo -create -output "$APP/Contents/MacOS/swmic-bridge" \
   target/aarch64-apple-darwin/release/swmic-bridge \
   target/x86_64-apple-darwin/release/swmic-bridge

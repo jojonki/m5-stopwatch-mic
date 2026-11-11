@@ -37,12 +37,15 @@ pub enum State {
     Searching = 0,
     Connected = 1,
     OnAir = 2,
+    Paused = 3, // disconnected on purpose from the menu
 }
 
 pub struct Shared {
     pub jb: Mutex<JitterBuffer>,
     pub key: FKey,
     pub key_down: AtomicBool,
+    /// false = stay disconnected (menu "Disconnect"), so another PC can connect
+    pub enabled: AtomicBool,
     state: AtomicU8,
     message: Mutex<Option<String>>,
 }
@@ -52,6 +55,7 @@ impl Shared {
         match self.state.load(Ordering::Relaxed) {
             1 => State::Connected,
             2 => State::OnAir,
+            3 => State::Paused,
             _ => State::Searching,
         }
     }
@@ -79,11 +83,12 @@ fn arg(name: &str) -> Option<String> {
     None
 }
 
-/// Round status dot for the tray: grey = searching, green = connected, red = on air.
+/// Round status dot for the tray: grey = searching, green = connected,
+/// red = on air, hollow ring = disconnected on purpose.
 fn icon(state: State) -> Icon {
     const N: u32 = 32;
     let (r, g, b) = match state {
-        State::Searching => (0x8a, 0x8a, 0x96),
+        State::Searching | State::Paused => (0x8a, 0x8a, 0x96),
         State::Connected => (0x2e, 0xc2, 0x7e),
         State::OnAir => (0xff, 0x4d, 0x6a),
     };
@@ -92,7 +97,10 @@ fn icon(state: State) -> Icon {
     for y in 0..N {
         for x in 0..N {
             let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();
-            let a = (11.5 - d).clamp(0.0, 1.0); // anti-aliased disc, r = 11.5 px
+            let mut a = (11.5 - d).clamp(0.0, 1.0); // anti-aliased disc, r = 11.5 px
+            if state == State::Paused {
+                a = a.min((d - 8.5).clamp(0.0, 1.0)); // ring, 3 px wide
+            }
             rgba.extend_from_slice(&[r, g, b, (a * 255.0) as u8]);
         }
     }
@@ -104,6 +112,7 @@ fn status_text(state: State) -> &'static str {
         State::Searching => "Searching for StopWatch…",
         State::Connected => "Connected",
         State::OnAir => "On air",
+        State::Paused => "Disconnected",
     }
 }
 
@@ -115,6 +124,7 @@ fn main() {
         jb: Mutex::new(JitterBuffer::new()),
         key,
         key_down: AtomicBool::new(false),
+        enabled: AtomicBool::new(true),
         state: AtomicU8::new(State::Searching as u8),
         message: Mutex::new(None),
     });
@@ -140,10 +150,18 @@ fn main() {
 
     let status_item = MenuItem::new(status_text(State::Searching), false, None);
     let detail_item = MenuItem::new(&output_line, false, None);
+    let toggle_item = MenuItem::new("Disconnect", true, None);
     let quit_item = MenuItem::new("Quit", true, None);
     let menu = Menu::new();
-    menu.append_items(&[&status_item, &detail_item, &PredefinedMenuItem::separator(), &quit_item])
-        .expect("menu");
+    menu.append_items(&[
+        &status_item,
+        &detail_item,
+        &PredefinedMenuItem::separator(),
+        &toggle_item,
+        &PredefinedMenuItem::separator(),
+        &quit_item,
+    ])
+    .expect("menu");
 
     let mut menu = Some(menu);
     let mut tray = None;
@@ -166,6 +184,11 @@ fn main() {
         }
 
         if let Ok(ev) = menu_rx.try_recv() {
+            if &ev.id == toggle_item.id() {
+                let enable = !shared.enabled.load(Ordering::Relaxed);
+                shared.enabled.store(enable, Ordering::Relaxed);
+                toggle_item.set_text(if enable { "Disconnect" } else { "Connect" });
+            }
             if &ev.id == quit_item.id() {
                 if shared.key_down.swap(false, Ordering::Relaxed) {
                     key::send(shared.key, false);

@@ -1,7 +1,8 @@
 // M5Stack StopWatch: wireless mic + push-to-hold trigger over Wi-Fi (UDP)
 //
 // Protocol (see tools/swmic_helper.py):
-//   helper -> device  UDP :4999  "SWMIC-HELLO" + u16le reply_port   (broadcast, ~1 Hz)
+//   helper -> device  UDP :4999  "SWMIC-HELLO" + u16le reply_port [+ UTF-8 host name]
+//                                (broadcast, ~1 Hz)
 //   device -> helper  UDP :reply_port
 //       "SWM1" | u32le seq | u8 flags (bit0 = trigger held) | 3 x u8 reserved
 //       | N x int16le samples (16 kHz mono; N = 320, or 0 for a trigger-only packet)
@@ -140,7 +141,7 @@ static void beacon_task(void *) {
   timeval tv = {1, 0};
   setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-  char buf[64];
+  char buf[128];
   for (;;) {
     sockaddr_in from = {};
     socklen_t from_len = sizeof(from);
@@ -158,8 +159,17 @@ static void beacon_task(void *) {
       if (changed) {
         ESP_LOGI(TAG, "helper at %s:%u", inet_ntoa(from.sin_addr), port);
       }
+      // optional host name after the port
+      char name[64];
+      size_t name_len = n - (mlen + 2);
+      if (name_len > sizeof(name) - 1) name_len = sizeof(name) - 1;
+      memcpy(name, buf + mlen + 2, name_len);
+      name[name_len] = 0;
+      ui_set_peer(name);
     }
-    g_ui.streaming.store(helper_alive());
+    bool alive = helper_alive();
+    g_ui.streaming.store(alive);
+    if (!alive) ui_set_peer("");
   }
 }
 

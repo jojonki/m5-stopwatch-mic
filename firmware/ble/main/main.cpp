@@ -79,7 +79,7 @@ extern "C" void app_main(void) {
   s_sink = new BleSink();
   s_gate = new swmic::TriggerGate(*s_sink);
 
-  ble_audio_init("StopWatch Mic");
+  ble_audio_init("StopWatch Mic", ui_set_peer);
   swmic::mic_start(on_mic_chunk, nullptr);
 
   for (;;) {

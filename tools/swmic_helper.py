@@ -35,6 +35,7 @@ import queue
 import re
 import socket
 import subprocess
+import sys
 import struct
 import threading
 import time
@@ -170,10 +171,23 @@ def broadcast_addrs() -> list[str]:
     return sorted(set(re.findall(r"broadcast (\d+\.\d+\.\d+\.\d+)", out)))
 
 
+def host_name() -> bytes:
+    """Human-readable name of this computer, shown on the StopWatch (<= 60 bytes)."""
+    name = ""
+    if sys.platform == "darwin":
+        try:
+            name = subprocess.run(["scutil", "--get", "ComputerName"],
+                                  capture_output=True, text=True).stdout.strip()
+        except OSError:
+            pass
+    name = name or socket.gethostname()
+    return name.encode("utf-8")[:60].decode("utf-8", "ignore").encode("utf-8")
+
+
 def beacon_loop(stop: threading.Event) -> None:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    msg = BEACON_MAGIC + struct.pack("<H", LISTEN_PORT)
+    msg = BEACON_MAGIC + struct.pack("<H", LISTEN_PORT) + host_name()
     addrs: list[str] = []
     tick = 0
     while not stop.is_set():
@@ -296,6 +310,7 @@ def run_udp(rx: Receiver, stop: threading.Event) -> None:
 
 BLE_SERVICE = "7a1e0001-5c3b-4c8e-9a51-2f6d8e3b9c10"
 BLE_CHAR = "7a1e0002-5c3b-4c8e-9a51-2f6d8e3b9c10"
+BLE_HOST_CHAR = "7a1e0003-5c3b-4c8e-9a51-2f6d8e3b9c10"
 
 
 def run_ble(rx: Receiver, stop: threading.Event) -> None:
@@ -324,6 +339,10 @@ def run_ble(rx: Receiver, stop: threading.Event) -> None:
                 async with BleakClient(dev, disconnected_callback=lambda _c: gone.set()) as client:
                     print(f"StopWatch connected: {dev.name} (mtu {client.mtu_size})", flush=True)
                     await client.start_notify(BLE_CHAR, on_notify)
+                    try:
+                        await client.write_gatt_char(BLE_HOST_CHAR, host_name(), response=True)
+                    except Exception as e:  # noqa: BLE001 - older firmware has no host characteristic
+                        print("could not send host name:", e, flush=True)
                     await gone.wait()
             except Exception as e:  # noqa: BLE001 - keep retrying on any BLE error
                 print("BLE error:", e, flush=True)

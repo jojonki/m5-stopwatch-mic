@@ -10,9 +10,12 @@ extern "C" {
 // GATT service exposing one notify characteristic that carries the audio /
 // trigger packets. UUIDs (must match tools/swmic_helper.py):
 //   service  7a1e0001-5c3b-4c8e-9a51-2f6d8e3b9c10
-//   packets  7a1e0002-5c3b-4c8e-9a51-2f6d8e3b9c10
+//   packets  7a1e0002-5c3b-4c8e-9a51-2f6d8e3b9c10  (notify)
+//   host     7a1e0003-5c3b-4c8e-9a51-2f6d8e3b9c10  (write: UTF-8 name of the connected host)
 
-void ble_audio_init(const char *device_name);
+// on_host is called with the host's name when it writes it, and with "" on
+// disconnect (from the NimBLE host task).
+void ble_audio_init(const char *device_name, void (*on_host)(const char *name));
 
 // true while a central is connected / has enabled notifications
 bool ble_audio_connected(void);

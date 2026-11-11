@@ -201,6 +201,7 @@ extern "C" void app_main(void) {
 
     g_ui.key_down.store(key_sent);
     g_ui.mounted.store(tud_mounted());
+    ui_set_peer(tud_mounted() ? "USB" : "");  // the host's name is not known over USB
     g_ui.streaming.store(s_streaming);
 
     vTaskDelay(pdMS_TO_TICKS(5));

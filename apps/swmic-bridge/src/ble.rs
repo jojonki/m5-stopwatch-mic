@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
+use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter, WriteType};
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures::StreamExt;
 use uuid::Uuid;
@@ -20,6 +20,7 @@ use crate::{adpcm, key, Shared, State};
 
 const SERVICE: Uuid = Uuid::from_u128(0x7a1e0001_5c3b_4c8e_9a51_2f6d8e3b9c10);
 const PACKETS: Uuid = Uuid::from_u128(0x7a1e0002_5c3b_4c8e_9a51_2f6d8e3b9c10);
+const HOST: Uuid = Uuid::from_u128(0x7a1e0003_5c3b_4c8e_9a51_2f6d8e3b9c10);
 const KEY_TIMEOUT: Duration = Duration::from_millis(500);
 
 type Res<T> = Result<T, Box<dyn Error>>;
@@ -37,12 +38,20 @@ pub fn run(shared: Arc<Shared>) {
             }
         };
         loop {
+            if !shared.enabled.load(Ordering::Relaxed) {
+                shared.set_state(State::Paused);
+                while !shared.enabled.load(Ordering::Relaxed) {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+            }
             shared.set_state(State::Searching);
             if let Err(e) = session(&adapter, &shared).await {
                 shared.set_message(format!("BLE: {e}"));
             }
             set_key(&shared, false);
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            if shared.enabled.load(Ordering::Relaxed) {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
         }
     });
 }
@@ -52,14 +61,20 @@ async fn first_adapter() -> Res<Adapter> {
     Ok(manager.adapters().await?.into_iter().next().ok_or("no Bluetooth adapter")?)
 }
 
-async fn find_device(adapter: &Adapter) -> Res<Peripheral> {
+/// Scans until the StopWatch shows up. Returns None if the user disconnects
+/// (pauses) from the menu while scanning.
+async fn find_device(adapter: &Adapter, shared: &Shared) -> Res<Option<Peripheral>> {
     adapter.start_scan(ScanFilter { services: vec![SERVICE] }).await?;
     loop {
+        if !shared.enabled.load(Ordering::Relaxed) {
+            adapter.stop_scan().await.ok();
+            return Ok(None);
+        }
         for p in adapter.peripherals().await? {
             if let Ok(Some(props)) = p.properties().await {
                 if props.services.contains(&SERVICE) {
                     adapter.stop_scan().await.ok();
-                    return Ok(p);
+                    return Ok(Some(p));
                 }
             }
         }
@@ -68,7 +83,7 @@ async fn find_device(adapter: &Adapter) -> Res<Peripheral> {
 }
 
 async fn session(adapter: &Adapter, shared: &Shared) -> Res<()> {
-    let dev = find_device(adapter).await?;
+    let Some(dev) = find_device(adapter, shared).await? else { return Ok(()) };
     dev.connect().await?;
     dev.discover_services().await?;
     let ch = dev
@@ -78,6 +93,11 @@ async fn session(adapter: &Adapter, shared: &Shared) -> Res<()> {
         .ok_or("StopWatch characteristic not found")?;
     let mut notes = dev.notifications().await?;
     dev.subscribe(&ch).await?;
+    // Tell the StopWatch who we are (shown on its screen). Older firmware
+    // has no such characteristic; that's fine.
+    if let Some(host_ch) = dev.characteristics().into_iter().find(|c| c.uuid == HOST) {
+        dev.write(&host_ch, host_name().as_bytes(), WriteType::WithResponse).await.ok();
+    }
     shared.set_state(State::Connected);
 
     let mut last_rx = Instant::now();
@@ -101,6 +121,12 @@ async fn session(adapter: &Adapter, shared: &Shared) -> Res<()> {
                 }
             }
             _ = tick.tick() => {
+                // menu "Disconnect": drop the link so another PC can connect
+                if !shared.enabled.load(Ordering::Relaxed) {
+                    set_key(shared, false);
+                    dev.disconnect().await.ok();
+                    return Ok(());
+                }
                 // never leave the key stuck if the device goes quiet mid-press
                 if shared.key_down.load(Ordering::Relaxed) && last_rx.elapsed() > KEY_TIMEOUT {
                     set_key(shared, false);
@@ -119,8 +145,30 @@ async fn session(adapter: &Adapter, shared: &Shared) -> Res<()> {
 fn set_key(shared: &Shared, down: bool) {
     if shared.key_down.swap(down, Ordering::Relaxed) != down {
         key::send(shared.key, down);
-        if shared.state() != State::Searching {
+        if matches!(shared.state(), State::Connected | State::OnAir) {
             shared.set_state(if down { State::OnAir } else { State::Connected });
         }
     }
+}
+
+/// Human-readable name of this computer, at most 60 bytes of UTF-8.
+fn host_name() -> String {
+    #[cfg(target_os = "macos")]
+    let name = std::process::Command::new("scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    #[cfg(target_os = "windows")]
+    let name = std::env::var("COMPUTERNAME").unwrap_or_default();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let name = std::env::var("HOSTNAME").unwrap_or_default();
+
+    let mut name = if name.is_empty() { "computer".to_string() } else { name };
+    while name.len() > 60 {
+        name.pop();
+    }
+    name
 }

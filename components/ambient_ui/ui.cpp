@@ -12,11 +12,28 @@
 
 #include <M5Unified.h>
 #include <math.h>
+#include <string.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 UiState g_ui;
+
+namespace {
+portMUX_TYPE s_peer_mux = portMUX_INITIALIZER_UNLOCKED;
+char s_peer[64] = "";
+uint32_t s_peer_seq = 0;
+}  // namespace
+
+void ui_set_peer(const char *name) {
+  if (!name) name = "";
+  portENTER_CRITICAL(&s_peer_mux);
+  if (strncmp(s_peer, name, sizeof(s_peer) - 1) != 0) {
+    strlcpy(s_peer, name, sizeof(s_peer));
+    ++s_peer_seq;
+  }
+  portEXIT_CRITICAL(&s_peer_mux);
+}
 
 namespace {
 
@@ -79,10 +96,22 @@ void render_orb(float on, float lv) {
   c.fillSmoothCircle(x, y, radius * 0.62f, rgb(dim(mix(GLOW_COLOR, CORE_COLOR, 0.6f), on * (0.75f + 0.25f * lv))));
 }
 
-// tiny connection dot under the orb
-void render_status(bool mounted, bool streaming) {
+// tiny connection dot under the orb, and the host name (or "Not connected") under it
+void render_status(bool mounted, bool streaming, const char *peer) {
   uint32_t col = !mounted ? 0x401818 : (streaming ? 0x1C4A34 : 0x2A2A30);
   M5.Display.fillSmoothCircle(s_cx, s_cy + 150, 4, rgb(col));
+
+  constexpr int W = 300, H = 26, Y = 178;
+  M5.Display.fillRect(s_cx - W / 2, s_cy + Y - H / 2, W, H, TFT_BLACK);
+  M5.Display.setFont(&fonts::lgfxJapanGothicP_20);
+  M5.Display.setTextDatum(middle_center);
+  if (peer[0]) {
+    M5.Display.setTextColor(rgb(0x6A6A78), TFT_BLACK);
+    M5.Display.drawString(peer, s_cx, s_cy + Y);
+  } else {
+    M5.Display.setTextColor(rgb(0x3A3A44), TFT_BLACK);
+    M5.Display.drawString("Not connected", s_cx, s_cy + Y);
+  }
 }
 
 void ui_task(void *) {
@@ -103,17 +132,30 @@ void ui_task(void *) {
   TickType_t last = xTaskGetTickCount();
   TickType_t last_touch = last;
   bool asleep = false;
+  uint32_t shown_peer_seq = 0;
+  char peer[64] = "";
 
   for (;;) {
     bool key = g_ui.key_down.load();
     bool mounted = g_ui.mounted.load();
     bool streaming = g_ui.streaming.load();
 
+    // host name changes count as activity so the new name is shown
+    bool peer_changed = false;
+    portENTER_CRITICAL(&s_peer_mux);
+    if (s_peer_seq != shown_peer_seq) {
+      shown_peer_seq = s_peer_seq;
+      strlcpy(peer, s_peer, sizeof(peer));
+      peer_changed = true;
+    }
+    portEXIT_CRITICAL(&s_peer_mux);
+
     // Screen sleep: off after SLEEP_AFTER without a press, back on at the next press.
     TickType_t now = xTaskGetTickCount();
-    if (key) last_touch = now;
+    if (key || peer_changed) last_touch = now;
+    if (peer_changed) last_status = -1;
     if (asleep) {
-      if (!key) {
+      if (!key && !peer_changed) {
         vTaskDelayUntil(&last, pdMS_TO_TICKS(50));
         continue;
       }
@@ -146,7 +188,7 @@ void ui_task(void *) {
     int status = (mounted ? 1 : 0) | (streaming ? 2 : 0);
     if (status != last_status) {
       last_status = status;
-      render_status(mounted, streaming);
+      render_status(mounted, streaming, peer);
     }
 
     vTaskDelayUntil(&last, pdMS_TO_TICKS(20));

@@ -13,3 +13,8 @@ struct UiState {
 extern UiState g_ui;
 
 void ui_start(void);
+
+// Name of the connected host ("" when none -> "Not connected"). Shown small
+// under the status dot; a change briefly wakes the screen. Safe to call from
+// any task.
+void ui_set_peer(const char *name);

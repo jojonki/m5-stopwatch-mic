@@ -9,7 +9,9 @@ push-to-talk microphone for your Mac.
   hotkey.
 - **Ambient display**: a faint ring at rest, which turns into a glowing orb
   that follows your voice while the button is held. A small dot shows the link
-  state (red: not connected, grey: connected, green: streaming).
+  state (red: not connected, grey: connected, green: streaming), with the
+  connected computer's name (or "Not connected") under it. The screen turns
+  off after 5 s without a press.
 
 Three firmwares, pick the one that fits:
 
@@ -95,6 +97,18 @@ is held:
 |---|---|---|
 | Virtual device | [BlackHole 2ch](https://existential.audio/blackhole/) | [VB-CABLE](https://vb-audio.com/Cable/) |
 | Mic to choose in your app | BlackHole 2ch | CABLE Output |
+
+Download from [Releases](https://github.com/jojonki/m5-stopwatch-mic/releases):
+
+- **macOS** (Apple silicon + Intel): `StopWatch-Mic-macOS.zip`. The app is
+  not notarized; on first launch right-click it and choose **Open**, or run
+  `xattr -dr com.apple.quarantine "StopWatch Mic.app"`.
+- **Windows** (x64): `swmic-bridge-windows-x64.zip`. SmartScreen may warn on
+  first run (unsigned): **More info → Run anyway**.
+
+The tray menu has **Disconnect / Connect**: the StopWatch links to one
+computer at a time, so disconnect on one machine and connect on the other to
+switch. The StopWatch shows the connected computer's name under the dot.
 
 Build (needs [Rust](https://rustup.rs/)):
 

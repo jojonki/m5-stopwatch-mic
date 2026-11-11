@@ -24,7 +24,13 @@ static const ble_uuid128_t SVC_UUID = BLE_UUID128_INIT(
 static const ble_uuid128_t CHR_UUID = BLE_UUID128_INIT(
     0x10, 0x9c, 0x3b, 0x8e, 0x6d, 0x2f, 0x51, 0x9a, 0x8e, 0x4c, 0x3b, 0x5c, 0x02, 0x00, 0x1e, 0x7a);
 
+// 7a1e0003-5c3b-4c8e-9a51-2f6d8e3b9c10
+static const ble_uuid128_t HOST_UUID = BLE_UUID128_INIT(
+    0x10, 0x9c, 0x3b, 0x8e, 0x6d, 0x2f, 0x51, 0x9a, 0x8e, 0x4c, 0x3b, 0x5c, 0x03, 0x00, 0x1e, 0x7a);
+
 static uint16_t s_chr_handle;
+static uint16_t s_host_handle;
+static void (*s_on_host)(const char *name);
 static volatile uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
 static volatile bool s_subscribed = false;
 static volatile uint16_t s_mtu = 23;
@@ -36,12 +42,32 @@ static int chr_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt 
   return 0;
 }
 
+// The host writes its name here right after connecting.
+static int host_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg) {
+  if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return 0;
+  char name[64];
+  uint16_t len = 0;
+  if (ble_hs_mbuf_to_flat(ctxt->om, name, sizeof(name) - 1, &len) != 0) {
+    len = sizeof(name) - 1;
+  }
+  name[len] = 0;
+  ESP_LOGI(TAG, "host: %s", name);
+  if (s_on_host) s_on_host(name);
+  return 0;
+}
+
 static const struct ble_gatt_chr_def s_chrs[] = {
     {
         .uuid = &CHR_UUID.u,
         .access_cb = chr_access,
         .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
         .val_handle = &s_chr_handle,
+    },
+    {
+        .uuid = &HOST_UUID.u,
+        .access_cb = host_access,
+        .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+        .val_handle = &s_host_handle,
     },
     {0},
 };
@@ -126,6 +152,7 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       s_conn = BLE_HS_CONN_HANDLE_NONE;
       s_subscribed = false;
       s_mtu = 23;
+      if (s_on_host) s_on_host("");
       advertise();
       break;
 
@@ -178,8 +205,9 @@ static void host_task(void *param) {
   nimble_port_freertos_deinit();
 }
 
-void ble_audio_init(const char *device_name) {
+void ble_audio_init(const char *device_name, void (*on_host)(const char *name)) {
   if (device_name) s_name = device_name;
+  s_on_host = on_host;
 
   esp_err_t err = nvs_flash_init();
   if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {

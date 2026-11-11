@@ -20,8 +20,9 @@ cargo build --release --target x86_64-apple-darwin
 APP="target/StopWatch Mic.app"
 ZIP="target/StopWatch-Mic-macOS.zip"
 rm -rf "$APP" "$ZIP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp macos/Info.plist "$APP/Contents/Info.plist"
+cp assets/app.icns "$APP/Contents/Resources/app.icns"
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
 lipo -create -output "$APP/Contents/MacOS/swmic-bridge" \

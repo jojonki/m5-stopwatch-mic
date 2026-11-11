@@ -15,6 +15,7 @@ mod adpcm;
 mod audio;
 mod ble;
 mod config;
+mod icons;
 mod jitter;
 mod key;
 mod log;
@@ -27,7 +28,7 @@ use std::time::{Duration, Instant};
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
-use tray_icon::{Icon, TrayIconBuilder};
+use tray_icon::TrayIconBuilder;
 
 use jitter::JitterBuffer;
 use key::FKey;
@@ -109,30 +110,6 @@ fn arg(name: &str) -> Option<String> {
         }
     }
     None
-}
-
-/// Round status dot for the tray: grey = searching, green = connected,
-/// red = on air, hollow ring = disconnected on purpose.
-fn icon(state: State) -> Icon {
-    const N: u32 = 32;
-    let (r, g, b) = match state {
-        State::Searching | State::Paused => (0x8a, 0x8a, 0x96),
-        State::Connected => (0x2e, 0xc2, 0x7e),
-        State::OnAir => (0xff, 0x4d, 0x6a),
-    };
-    let mut rgba = Vec::with_capacity((N * N * 4) as usize);
-    let c = (N as f32 - 1.0) / 2.0;
-    for y in 0..N {
-        for x in 0..N {
-            let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();
-            let mut a = (11.5 - d).clamp(0.0, 1.0); // anti-aliased disc, r = 11.5 px
-            if state == State::Paused {
-                a = a.min((d - 8.5).clamp(0.0, 1.0)); // ring, 3 px wide
-            }
-            rgba.extend_from_slice(&[r, g, b, (a * 255.0) as u8]);
-        }
-    }
-    Icon::from_rgba(rgba, N, N).expect("icon")
 }
 
 fn status_text(state: State) -> &'static str {
@@ -276,7 +253,8 @@ fn main() {
                 TrayIconBuilder::new()
                     .with_menu(Box::new(menu.take().unwrap()))
                     .with_tooltip("StopWatch Mic")
-                    .with_icon(icon(State::Searching))
+                    .with_icon(icons::tray(State::Searching))
+                    .with_icon_as_template(icons::IS_TEMPLATE)
                     .build()
                     .expect("tray icon"),
             );
@@ -351,7 +329,7 @@ fn main() {
         let now = (shared.state(), shared.message.lock().unwrap().clone());
         if shown.as_ref() != Some(&now) {
             if let Some(t) = &tray {
-                let _ = t.set_icon(Some(icon(now.0)));
+                let _ = t.set_icon_with_as_template(Some(icons::tray(now.0)), icons::IS_TEMPLATE);
                 let text = now.1.clone().unwrap_or_else(|| status_text(now.0).to_string());
                 status_item.set_text(&text);
                 let _ = t.set_tooltip(Some(format!("StopWatch Mic — {text}")));

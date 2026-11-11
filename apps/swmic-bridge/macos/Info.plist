@@ -8,6 +8,8 @@
   <string>StopWatch Mic</string>
   <key>CFBundleIdentifier</key>
   <string>io.github.jojonki.swmic-bridge</string>
+  <key>CFBundleIconFile</key>
+  <string>app</string>
   <key>CFBundleExecutable</key>
   <string>swmic-bridge</string>
   <key>CFBundlePackageType</key>

@@ -17,6 +17,7 @@ mod ble;
 mod config;
 mod jitter;
 mod key;
+mod log;
 mod update;
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -237,6 +238,8 @@ fn main() {
         key_menu.append(item).expect("menu");
     }
     let toggle_item = MenuItem::new("Disconnect", true, None);
+    // macOS: shown only while the Accessibility permission is missing
+    let perm_item = MenuItem::new("⚠ Allow Accessibility to send the key…", true, None);
     let update_item = MenuItem::new(update_label(&UpdateState::Idle), true, None);
     let quit_item = MenuItem::new("Quit", true, None);
     let menu = Menu::new();
@@ -244,6 +247,7 @@ fn main() {
         &status_item,
         &detail_item,
         &PredefinedMenuItem::separator(),
+        &perm_item,
         &key_menu,
         &toggle_item,
         &PredefinedMenuItem::separator(),
@@ -252,6 +256,11 @@ fn main() {
     ])
     .expect("menu");
     let mut shown_update = String::new();
+    // Ask once at startup (macOS shows its dialog), then poll quietly.
+    let mut key_ok = key::can_send(true);
+    log::line(&format!("start v{} key F{} post-event access: {key_ok}", update::CURRENT, key.0));
+    let mut perm_shown = true;
+    let mut last_perm_check = Instant::now();
 
     let mut menu = Some(menu);
     let mut tray = None;
@@ -283,6 +292,9 @@ fn main() {
                 }
                 key_menu.set_text(format!("Trigger key: F{}", k.0));
             }
+            if &ev.id == perm_item.id() {
+                key::open_permission_settings();
+            }
             if &ev.id == update_item.id() {
                 let available = match &*shared.update.lock().unwrap() {
                     UpdateState::Available(r) => Some(r.clone()),
@@ -311,6 +323,21 @@ fn main() {
             tray.take();
             *control_flow = ControlFlow::Exit;
             return;
+        }
+
+        if last_perm_check.elapsed() > Duration::from_secs(2) {
+            last_perm_check = Instant::now();
+            key_ok = key::can_send(false);
+        }
+        if perm_shown == key_ok {
+            if key_ok {
+                perm_item.set_enabled(false);
+                perm_item.set_text("Key events: allowed");
+            } else {
+                perm_item.set_enabled(true);
+                perm_item.set_text("⚠ Allow Accessibility to send the key…");
+            }
+            perm_shown = !key_ok;
         }
 
         let label = update_label(&shared.update.lock().unwrap());

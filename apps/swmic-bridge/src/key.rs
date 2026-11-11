@@ -26,6 +26,7 @@ pub fn send(key: FKey, down: bool) {
     // Hardware F-keys carry the Fn flag; strict hotkey matchers may expect it.
     ev.set_flags(CGEventFlags::CGEventFlagSecondaryFn | CGEventFlags::CGEventFlagNonCoalesced);
     ev.post(CGEventTapLocation::HID);
+    crate::log::line(&format!("key F{} {} (post-event access: {})", key.0, if down { "down" } else { "up" }, can_send(false)));
 }
 
 #[cfg(target_os = "windows")]
@@ -52,3 +53,44 @@ pub fn send(key: FKey, down: bool) {
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn send(_key: FKey, _down: bool) {}
+
+/// Whether synthetic key events will reach other apps. On macOS this is the
+/// "post events" permission (listed under Accessibility); without it events
+/// are silently dropped. With `prompt`, macOS asks for it (and lists the app
+/// in System Settings) if it is missing.
+#[cfg(target_os = "macos")]
+pub fn can_send(prompt: bool) -> bool {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGPreflightPostEventAccess() -> bool;
+        fn CGRequestPostEventAccess() -> bool;
+    }
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+    }
+    unsafe {
+        // CGPreflightPostEventAccess is cached for the life of the process, so
+        // a grant made while running only shows up via AXIsProcessTrusted.
+        if AXIsProcessTrusted() || CGPreflightPostEventAccess() {
+            return true;
+        }
+        if prompt {
+            return CGRequestPostEventAccess();
+        }
+        false
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn can_send(_prompt: bool) -> bool {
+    true
+}
+
+/// Opens the system settings page where the permission is granted.
+pub fn open_permission_settings() {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        .spawn();
+}

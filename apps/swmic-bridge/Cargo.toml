@@ -1,6 +1,6 @@
 [package]
 name = "swmic-bridge"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Tray app bridging the BLE StopWatch mic to a virtual audio device and a trigger key"
 

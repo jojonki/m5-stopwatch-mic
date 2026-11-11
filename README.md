@@ -17,7 +17,7 @@ Three firmwares, pick the one that fits:
 |---|---|---|---|
 | Directory | `firmware/usb` | `firmware/wifi` | `firmware/ble` |
 | Connection | USB-C cable | same LAN | Bluetooth LE |
-| Mac software | none | helper + BlackHole | helper + BlackHole |
+| Host software | none | helper + BlackHole | tray app (or helper) + BlackHole / VB-CABLE |
 | Shows up as | USB mic "StopWatch Mic" + USB keyboard | "BlackHole 2ch" input | "BlackHole 2ch" input |
 | Audio sent | always while an app uses the mic | only while the button is held | only while the button is held |
 
@@ -82,6 +82,36 @@ block it; use the USB or BLE version there.
 No pairing or network setup is needed; the helper finds the device by its
 BLE service.
 
+## Tray app for BLE (`apps/swmic-bridge`, macOS / Windows)
+
+A small native app (~1 MB) that does the helper's job for the BLE firmware
+and lives in the menu bar / system tray. The dot shows the state: grey =
+searching, green = connected, red = button held.
+
+It plays the audio into a virtual audio device and holds F3 while the button
+is held:
+
+| | macOS | Windows |
+|---|---|---|
+| Virtual device | [BlackHole 2ch](https://existential.audio/blackhole/) | [VB-CABLE](https://vb-audio.com/Cable/) |
+| Mic to choose in your app | BlackHole 2ch | CABLE Output |
+
+Build (needs [Rust](https://rustup.rs/)):
+
+```sh
+# macOS: builds "StopWatch Mic.app" into apps/swmic-bridge/target/
+apps/swmic-bridge/macos/bundle.sh
+
+# Windows (on Windows, or cross-compiled from macOS with mingw-w64)
+cd apps/swmic-bridge
+cargo build --release                                   # on Windows
+cargo build --release --target x86_64-pc-windows-gnu    # from macOS
+```
+
+Options: `--key f3` (F1-F20), `--device "<output device name>"`.
+On macOS, allow Bluetooth on first launch and give the app Accessibility
+permission so the key reaches other apps.
+
 ## Helper (`tools/swmic_helper.py`)
 
 Receives audio and button state from the wireless firmwares, plays the audio
@@ -108,7 +138,8 @@ firmware/wifi/          Wi-Fi firmware (UDP)
 firmware/ble/           BLE firmware (NimBLE, IMA ADPCM)
 components/swmic_core/  shared: mic capture, level meter, push-to-talk gating
 components/ambient_ui/  shared: display UI
-tools/swmic_helper.py   Mac helper for the wireless firmwares
+tools/swmic_helper.py   Mac helper for the wireless firmwares (Python)
+apps/swmic-bridge/      tray app for the BLE firmware (Rust, macOS / Windows)
 ```
 
 Each firmware only contains its transport; behavior shared by all of them

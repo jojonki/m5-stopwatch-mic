@@ -10,3 +10,5 @@ sdkconfig.secrets
 __pycache__/
 .venv/
 firmware/wifi/main/wifi_secrets.h
+# Rust
+target/

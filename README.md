@@ -1,7 +1,12 @@
 # m5-stopwatch-mic
 
 Turn an [M5Stack StopWatch](https://docs.m5stack.com/en/core/StopWatch) into a
-push-to-talk microphone for your Mac.
+push-to-talk microphone for your Mac / PC.
+
+<p align="center"><img src="docs/demo.gif" width="560" alt="Holding the button and saying おはようございます; the dictation app types it"></p>
+
+<p align="center"><sub>Hold the yellow button and speak (here: 「おはようございます」 / "good morning").
+The orb follows the voice, the button holds F3 for the dictation app, and the text appears on release.</sub></p>
 
 - **Microphone**: the built-in mic, 16 kHz mono.
 - **Trigger key**: hold the yellow button (KEYA) and the Mac sees **F3** held
@@ -25,6 +30,32 @@ Three firmwares, pick the one that fits:
 
 The wireless versions send ~100 ms of audio from just before the press and keep
 the key held ~300 ms after release, so words are not cut at either end.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph SW["StopWatch (ESP32-S3)"]
+    direction TB
+    MIC["Mic (ES8311)"] --> CORE["swmic_core<br/>16 kHz capture · push-to-talk gate"]
+    BTN["Yellow button"] --> CORE
+  end
+
+  CORE -- "USB: UAC2 mic + HID key" --> APP
+  CORE -- "Wi-Fi: UDP PCM" --> HELPER["swmic_helper.py"]
+  CORE -- "BLE: ADPCM notify" --> BRIDGE["swmic-bridge<br/>tray app"]
+
+  HELPER --> VDEV["Virtual mic<br/>BlackHole / VB-CABLE"]
+  BRIDGE --> VDEV
+  HELPER -. "F3" .-> APP
+  BRIDGE -. "F3" .-> APP
+  VDEV --> APP["Dictation / voice app"]
+```
+
+The device streams audio and the button state; the host side turns them into a
+microphone and a key press. Over USB the StopWatch is itself a USB microphone +
+keyboard; over Wi-Fi / BLE a small host program feeds a virtual audio device
+and posts the key.
 
 ## Requirements
 

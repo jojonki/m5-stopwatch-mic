@@ -64,6 +64,7 @@ pub struct Shared {
     pub enabled: AtomicBool,
     state: AtomicU8,
     message: Mutex<Option<String>>,
+    output: Mutex<String>, // audio output status line for the menu
     update: Mutex<UpdateState>,
     exit_requested: AtomicBool,
 }
@@ -93,6 +94,9 @@ impl Shared {
         if s != State::Searching {
             *self.message.lock().unwrap() = None;
         }
+    }
+    pub fn set_output(&self, m: String) {
+        *self.output.lock().unwrap() = m;
     }
     pub fn set_message(&self, m: String) {
         *self.message.lock().unwrap() = Some(m);
@@ -171,15 +175,13 @@ fn main() {
         enabled: AtomicBool::new(true),
         state: AtomicU8::new(State::Searching as u8),
         message: Mutex::new(None),
+        output: Mutex::new("Output: opening…".into()),
         update: Mutex::new(UpdateState::Idle),
         exit_requested: AtomicBool::new(false),
     });
 
-    // Audio out. Keep the stream alive for the whole run.
-    let (stream, output_line) = match audio::start(&device, shared.clone()) {
-        Ok((s, name)) => (Some(s), format!("Output: {name}")),
-        Err(e) => (None, format!("Audio: {e}")),
-    };
+    // Audio out, reopened automatically if the device goes away.
+    audio::spawn(device, shared.clone());
 
     {
         let shared = shared.clone();
@@ -206,7 +208,8 @@ fn main() {
     }
 
     let status_item = MenuItem::new(status_text(State::Searching), false, None);
-    let detail_item = MenuItem::new(&output_line, false, None);
+    let mut shown_output = shared.output.lock().unwrap().clone();
+    let detail_item = MenuItem::new(&shown_output, false, None);
     let key_menu = Submenu::new(format!("Trigger key: F{}", key.0), true);
     let key_items: Vec<CheckMenuItem> = (1..=20u8)
         .map(|n| CheckMenuItem::new(format!("F{n}"), true, n == key.0, None))
@@ -245,7 +248,6 @@ fn main() {
     let menu_rx = MenuEvent::receiver();
 
     event_loop.run(move |event, _, control_flow| {
-        let _keep_audio_alive = &stream;
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100));
 
         if let Event::NewEvents(StartCause::Init) = event {
@@ -324,6 +326,12 @@ fn main() {
             update_item.set_text(&label);
             update_item.set_enabled(!busy);
             shown_update = label;
+        }
+
+        let output = shared.output.lock().unwrap().clone();
+        if output != shown_output {
+            detail_item.set_text(&output);
+            shown_output = output;
         }
 
         let now = (shared.state(), shared.message.lock().unwrap().clone());

@@ -3,6 +3,8 @@
 //  idle    : true black, one faint thin ring in the middle
 //  trigger : the ring softly fades into a glowing orb that breathes with the voice
 //  untouched for 5 s : the panel goes to sleep until the next press
+//                      (not while on USB power: then it stays on)
+//  while the panel is on : a small battery gauge sits above the orb
 //
 // Only a 240x240 region around the centre is redrawn, motion is slow
 // (fades and low-passed size changes), and unchanged frames are skipped,
@@ -12,6 +14,7 @@
 
 #include <M5Unified.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -114,6 +117,57 @@ void render_status(bool mounted, bool streaming, const char *peer) {
   }
 }
 
+// small battery gauge above the orb: [bolt] outline + fill + "82%".
+// level < 0 = unknown. plugged = USB power present (bolt shown),
+// charging = the charger is actively charging (bolt / fill / text go green).
+void render_battery(int level, bool plugged, bool charging) {
+  constexpr int W = 180, H = 26, Y = -178;
+  M5.Display.fillRect(s_cx - W / 2, s_cy + Y - H / 2, W, H, TFT_BLACK);
+  if (level < 0) return;
+  if (level > 100) level = 100;
+
+  const uint32_t GREEN = 0x2E9A62;
+  const bool low = level <= 15 && !plugged;
+  const uint16_t line = rgb(low ? 0x7A3434 : 0x4A4A56);
+  const uint16_t fill = rgb(charging ? GREEN : (low ? 0x9A3A3A : 0x6A6A78));
+
+  char text[8];
+  snprintf(text, sizeof(text), "%d%%", level);
+  M5.Display.setFont(&fonts::lgfxJapanGothicP_20);
+  M5.Display.setTextDatum(middle_left);
+  const int tw = M5.Display.textWidth(text);
+
+  constexpr int BOLT_W = 10, BOLT_H = 16, BW = 28, BH = 14, GAP = 8;
+  const int total = (plugged ? BOLT_W + 6 : 0) + BW + 3 + GAP + tw;
+  int x = s_cx - total / 2;
+  const int yc = s_cy + Y;
+
+  if (plugged) {
+    const uint16_t bc = rgb(charging ? GREEN : 0x6A6A78);
+    const int bx = x, by = yc - BOLT_H / 2;
+    M5.Display.fillTriangle(bx + 7, by, bx + 1, by + 9, bx + 6, by + 9, bc);
+    M5.Display.fillTriangle(bx + 4, by + 7, bx + 9, by + 7, bx + 3, by + BOLT_H, bc);
+    x += BOLT_W + 6;
+  }
+
+  const int y0 = yc - BH / 2;
+  M5.Display.drawRoundRect(x, y0, BW, BH, 3, line);
+  M5.Display.fillRect(x + BW, yc - 3, 3, 6, line);  // terminal nub
+  const int fw = (BW - 4) * level / 100;
+  if (fw > 0) M5.Display.fillRect(x + 2, y0 + 2, fw, BH - 4, fill);
+
+  M5.Display.setTextColor(charging ? fill : rgb(0x6A6A78), TFT_BLACK);
+  M5.Display.drawString(text, x + BW + 3 + GAP, yc + 1);
+}
+
+// USB (5V in) present, read from the StopWatch's PM1.
+bool usb_power_present() {
+  if (M5.Power.getType() != m5::Power_Class::pmic_t::pmic_m5pm1) return false;
+  m5::M5PM1_Class::pwr_src_t src;
+  if (!M5.Power.M5pm1.getPowerSource(&src)) return false;
+  return src & (m5::M5PM1_Class::vin | m5::M5PM1_Class::vinout);
+}
+
 void ui_task(void *) {
   s_cx = M5.Display.width() / 2;
   s_cy = M5.Display.height() / 2;
@@ -134,6 +188,10 @@ void ui_task(void *) {
   bool asleep = false;
   uint32_t shown_peer_seq = 0;
   char peer[64] = "";
+  int last_batt = -2;                       // level*4 + plugged*2 + charging, -2 = not drawn
+  TickType_t last_batt_read = 0;
+  bool plugged_now = false;                 // USB power present -> never sleep
+  constexpr TickType_t BATT_EVERY = pdMS_TO_TICKS(2 * 1000);  // quick to show plug / unplug
 
   for (;;) {
     bool key = g_ui.key_down.load();
@@ -155,7 +213,12 @@ void ui_task(void *) {
     if (key || peer_changed) last_touch = now;
     if (peer_changed) last_status = -1;
     if (asleep) {
-      if (!key && !peer_changed) {
+      // plugging in wakes the panel (it then stays on while powered)
+      if (now - last_batt_read > BATT_EVERY) {
+        last_batt_read = now;
+        plugged_now = usb_power_present();
+      }
+      if (!key && !peer_changed && !plugged_now) {
         vTaskDelayUntil(&last, pdMS_TO_TICKS(50));
         continue;
       }
@@ -164,7 +227,8 @@ void ui_task(void *) {
       M5.Display.fillScreen(TFT_BLACK);
       on = 0;
       last_q_on = last_q_lv = last_status = -1;  // force a full redraw
-    } else if (now - last_touch > SLEEP_AFTER && on < 0.01f) {
+      last_batt = -2;
+    } else if (!plugged_now && now - last_touch > SLEEP_AFTER && on < 0.01f) {
       asleep = true;
       M5.Display.fillScreen(TFT_BLACK);
       M5.Display.sleep();
@@ -189,6 +253,21 @@ void ui_task(void *) {
     if (status != last_status) {
       last_status = status;
       render_status(mounted, streaming, peer);
+    }
+
+    // battery: read on wake and every 2 s while the panel is on
+    if (last_batt == -2 || now - last_batt_read > BATT_EVERY) {
+      last_batt_read = now;
+      int level = M5.Power.getBatteryLevel();
+      bool charging = level >= 0 && M5.Power.isCharging();
+      bool plugged = charging || usb_power_present();
+      if (plugged_now && !plugged) last_touch = now;  // unplugged: sleep 5 s from now
+      plugged_now = plugged;
+      int b = level < 0 ? -1 : level * 4 + (plugged ? 2 : 0) + (charging ? 1 : 0);
+      if (b != last_batt) {
+        last_batt = b;
+        render_battery(level, plugged, charging);
+      }
     }
 
     vTaskDelayUntil(&last, pdMS_TO_TICKS(20));
